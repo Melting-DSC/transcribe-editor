@@ -155,6 +155,11 @@ export default function App() {
   }, []);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  // Object URL currently loaded into the audio element. Lets us tell "a different
+  // audio file was attached" apart from "the effect merely re-ran".
+  const loadedAudioUrlRef = useRef<string | null>(null);
+  // Hidden picker used by the "re-attach audio" notice banner.
+  const relinkAudioInputRef = useRef<HTMLInputElement | null>(null);
 
   // Auto-save segments to localStorage on any change (text, timestamp, speaker, add, delete, import)
   useEffect(() => {
@@ -210,32 +215,58 @@ export default function App() {
     }
   }, []);
 
-  // Sync HTMLAudioElement
+  // Sync HTMLAudioElement with the attached audio source.
+  //
+  // Whenever a *different* audio file is attached we reload the element and must
+  // also reset the transport state explicitly: `HTMLMediaElement.load()` pauses
+  // playback without firing a `pause` event, so without this the `isPlaying` flag
+  // (and the play/pause button + scrubber) would keep reflecting the previous
+  // track, leaving the newly attached audio apparently unplayable.
   useEffect(() => {
-    if (!audioRef.current && audioUrl) {
-      const audio = new Audio(audioUrl);
+    // No audio attached anymore: make sure nothing keeps playing in the background.
+    if (!audioUrl) {
+      loadedAudioUrlRef.current = null;
+      if (audioRef.current) {
+        audioRef.current.pause();
+      }
+      setCurrentTime(0);
+      setIsPlaying(false);
+      setDuration(0);
+      return;
+    }
+
+    let audio = audioRef.current;
+    if (!audio) {
+      audio = new Audio();
       audioRef.current = audio;
 
-      audio.onloadedmetadata = () => {
-        setDuration(audio.duration || 0);
+      const el = audio;
+      el.onloadedmetadata = () => {
+        setDuration(el.duration || 0);
       };
 
-      audio.ontimeupdate = () => {
-        setCurrentTime(audio.currentTime);
+      el.ontimeupdate = () => {
+        setCurrentTime(el.currentTime);
       };
 
-      audio.onended = () => {
+      el.onended = () => {
         setIsPlaying(false);
       };
 
-      audio.onplay = () => setIsPlaying(true);
-      audio.onpause = () => setIsPlaying(false);
-    } else if (audioRef.current && audioUrl) {
-      if (audioRef.current.src !== audioUrl) {
-        audioRef.current.src = audioUrl;
-        audioRef.current.load();
-      }
+      el.onplay = () => setIsPlaying(true);
+      el.onpause = () => setIsPlaying(false);
     }
+
+    if (loadedAudioUrlRef.current === audioUrl) return;
+    loadedAudioUrlRef.current = audioUrl;
+
+    audio.pause();
+    audio.src = audioUrl;
+    audio.load();
+    // Reset the transport UI for the new track.
+    setCurrentTime(0);
+    setIsPlaying(false);
+    setDuration(0);
   }, [audioUrl]);
 
   // Derived list of distinct speakers
@@ -476,13 +507,18 @@ export default function App() {
   }, []);
 
   const handlePlayPause = useCallback(() => {
-    if (!audioRef.current) return;
-    if (isPlaying) {
-      audioRef.current.pause();
+    const audio = audioRef.current;
+    if (!audio) return;
+    // Derive the action from the element itself (same as the space-bar shortcut)
+    // so the button can never end up out of sync with actual playback.
+    if (!audio.paused) {
+      audio.pause();
+      setIsPlaying(false);
     } else {
-      audioRef.current.play().catch(console.warn);
+      audio.play().catch(console.warn);
+      setIsPlaying(true);
     }
-  }, [isPlaying]);
+  }, []);
 
   // Determine active utterance for audio sync
   const activeSegmentId = useMemo(() => {
@@ -642,6 +678,17 @@ export default function App() {
     setImportedAudioFileName(file.name);
     setIsAudioRelinkNoticeVisible(false);
   }, []);
+
+  // Standalone audio import: attach or replace the player's audio file on its own,
+  // without touching the transcript and without starting a transcription.
+  const handleImportAudioOnly = useCallback(
+    (file: File) => {
+      handleAudioFileSelected(file);
+      setSuccessMessage(`音声ファイル「${file.name}」を読み込みました。プレーヤーから再生できます。`);
+      setTimeout(() => setSuccessMessage(null), 4000);
+    },
+    [handleAudioFileSelected]
+  );
 
   // Transcribe API Call
   const handleTranscribe = async (
@@ -867,12 +914,33 @@ export default function App() {
                 前回使用した音声「{importedAudioFileName}」はブラウザの制約により再読み込みされていません（CSVのファイル名には引き続き使用されます）。再生するには音声ファイルを選択し直してください。
               </span>
             </div>
-            <button
-              onClick={() => setIsAudioRelinkNoticeVisible(false)}
-              className="font-bold underline ml-2 shrink-0"
-            >
-              閉じる
-            </button>
+            <div className="flex items-center gap-3 shrink-0">
+              <input
+                ref={relinkAudioInputRef}
+                type="file"
+                accept="audio/*,.mp3,.wav,.m4a,.webm,.ogg,.flac,.aac"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files && e.target.files[0];
+                  if (file) {
+                    handleImportAudioOnly(file);
+                  }
+                  e.target.value = '';
+                }}
+              />
+              <button
+                onClick={() => relinkAudioInputRef.current?.click()}
+                className="font-bold underline"
+              >
+                音声ファイルを選択
+              </button>
+              <button
+                onClick={() => setIsAudioRelinkNoticeVisible(false)}
+                className="text-amber-700 dark:text-amber-300 hover:underline"
+              >
+                閉じる
+              </button>
+            </div>
           </div>
         )}
 
@@ -881,7 +949,7 @@ export default function App() {
           onTranscribe={handleTranscribe}
           onLoadSample={handleLoadSample}
           onOpenCsvImport={() => setIsCsvImportModalOpen(true)}
-          onAudioFileSelected={handleAudioFileSelected}
+          onAudioFileSelected={handleImportAudioOnly}
           isProcessing={isProcessing}
           apiKeyConfigured={true}
         />
@@ -901,6 +969,7 @@ export default function App() {
           onOpenSpeakerManager={() => setIsSpeakerModalOpen(true)}
           onOpenCsvPreview={() => setIsCsvModalOpen(true)}
           onOpenCsvImport={() => setIsCsvImportModalOpen(true)}
+          onAudioFileSelected={handleImportAudioOnly}
           onAddSegment={handleAddSegmentAtBottom}
           onUndo={handleUndo}
           onRedo={handleRedo}
@@ -958,6 +1027,7 @@ export default function App() {
           }
         }}
         onToggleAutoScroll={() => setAutoScroll(!autoScroll)}
+        onAudioFileSelected={handleImportAudioOnly}
         audioRef={audioRef}
       />
 

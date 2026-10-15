@@ -16,6 +16,7 @@ import {
   Eye,
   CheckCircle2,
   RotateCcw,
+  FileAudio,
 } from 'lucide-react';
 import { TranscriptSegment } from '../types';
 import { downloadCsv, downloadJson, downloadTxt, generateCsvString, parseCsv, getCsvFileName } from '../utils/csv';
@@ -34,6 +35,7 @@ interface ToolbarProps {
   onOpenSpeakerManager: () => void;
   onOpenCsvPreview: () => void;
   onOpenCsvImport: () => void;
+  onAudioFileSelected: (file: File) => void;
   onAddSegment: () => void;
   onUndo: () => void;
   onRedo: () => void;
@@ -54,6 +56,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   onOpenSpeakerManager,
   onOpenCsvPreview,
   onOpenCsvImport,
+  onAudioFileSelected,
   onAddSegment,
   onUndo,
   onRedo,
@@ -61,8 +64,18 @@ export const Toolbar: React.FC<ToolbarProps> = ({
 }) => {
   const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const audioFileInputRef = useRef<HTMLInputElement>(null);
 
   const csvFileName = getCsvFileName(audioFileName);
+
+  const handleAudioFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files && e.target.files[0];
+    if (file) {
+      onAudioFileSelected(file);
+    }
+    // Allow re-selecting the same file again later.
+    e.target.value = '';
+  };
 
   const handleDownloadCsv = () => {
     downloadCsv(segments, csvFileName);
@@ -188,6 +201,23 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           >
             <Upload className="w-3.5 h-3.5 text-emerald-600" />
             <span>CSVインポート</span>
+          </button>
+
+          {/* Standalone Audio Import Button */}
+          <input
+            ref={audioFileInputRef}
+            type="file"
+            accept="audio/*,.mp3,.wav,.m4a,.webm,.ogg,.flac,.aac"
+            className="hidden"
+            onChange={handleAudioFileInputChange}
+          />
+          <button
+            onClick={() => audioFileInputRef.current?.click()}
+            className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-blue-50 dark:bg-blue-950/40 hover:bg-blue-100 dark:hover:bg-blue-900/40 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 rounded-xl transition font-semibold"
+            title="音声ファイルだけを読み込んでプレーヤーで再生します（文字起こしは実行しません）"
+          >
+            <FileAudio className="w-3.5 h-3.5 text-blue-600" />
+            <span>音声インポート</span>
           </button>
 
           {/* Main CSV Download Button */}

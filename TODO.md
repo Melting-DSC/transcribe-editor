@@ -46,8 +46,13 @@
   - `timestamp.split('-')` の手書き結合は非標準形式で壊れる。`parseRangeToSeconds` を使う。
   - 併せて未使用変数 `currentRange` / `nextRange` を削除。
 
-- [ ] **再生状態の真実源を一本化する** — `src/App.tsx:408 vs :473`
-  - `handlePlayPause` は `isPlaying` を参照、スペースキーは `audioRef.current.paused` を参照。ずれの余地をなくす。
+- [x] **再生状態の真実源を一本化する** — `src/App.tsx`
+  - `handlePlayPause` も `audioRef.current.paused` を参照し、スペースキーと同じ判定に統一。`isPlaying` は表示専用（`onplay`/`onpause` で同期）にした。
+
+- [x] **音声ファイルだけを差し替えるUIを追加する** — `src/App.tsx` / `Toolbar.tsx` / `AudioPlayerBar.tsx`
+  - ツールバー「音声インポート」とプレーヤーの「音声を差し替え」から、CSVを触らずに音声だけを読み込み直せるようにした（文字起こしは実行しない）。
+  - 音源変更時に `load()` は `pause` イベントを発火しないため、`isPlaying` / `currentTime` / `duration` を明示的にリセット。差し替え後に再生できないバグも解消。
+  - `audioUrl` が `null`（音声なし置換）のときは再生を止める。未再接続の注意バナーに「音声ファイルを選択」を追加。
 
 - [ ] **サーバの不要な再文字起こしを止める** — `server.ts:281, :374`
   - ネイティブ分離が無いだけで生テキストは取得済みなのに、Step2 で高コストな2回目の音声送信を実行。

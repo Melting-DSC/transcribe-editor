@@ -9,6 +9,7 @@ import {
   FastForward,
   Compass,
   Keyboard,
+  FileAudio,
 } from 'lucide-react';
 import { formatSecondsToTimestamp, PLAYBACK_RATES } from '../utils/time';
 
@@ -24,6 +25,7 @@ interface AudioPlayerBarProps {
   onSeek: (time: number) => void;
   onPlaybackRateChange: (rate: number) => void;
   onToggleAutoScroll: () => void;
+  onAudioFileSelected: (file: File) => void;
   audioRef: React.RefObject<HTMLAudioElement | null>;
 }
 
@@ -39,11 +41,22 @@ export const AudioPlayerBar: React.FC<AudioPlayerBarProps> = ({
   onSeek,
   onPlaybackRateChange,
   onToggleAutoScroll,
+  onAudioFileSelected,
   audioRef,
 }) => {
   const [volume, setVolume] = React.useState(1);
   const [isMuted, setIsMuted] = React.useState(false);
   const progressBarRef = useRef<HTMLDivElement>(null);
+  const audioFileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleAudioFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files && e.target.files[0];
+    if (file) {
+      onAudioFileSelected(file);
+    }
+    // Allow re-selecting the same file again later.
+    e.target.value = '';
+  };
 
   useEffect(() => {
     if (audioRef.current) {
@@ -114,11 +127,27 @@ export const AudioPlayerBar: React.FC<AudioPlayerBarProps> = ({
         {/* Controls row */}
         <div className="flex flex-wrap items-center justify-between gap-3">
           {/* File info */}
-          <div className="flex items-center gap-2 min-w-0 max-w-xs sm:max-w-sm">
+          <div className="flex items-center gap-2 min-w-0 max-w-xs sm:max-w-md">
             <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse shrink-0" />
             <span className="text-xs font-medium text-gray-700 dark:text-gray-300 truncate" title={audioName}>
               {audioName || '音声ファイル'}
             </span>
+            {/* Standalone audio import: swap the loaded file without touching the transcript */}
+            <input
+              ref={audioFileInputRef}
+              type="file"
+              accept="audio/*,.mp3,.wav,.m4a,.webm,.ogg,.flac,.aac"
+              className="hidden"
+              onChange={handleAudioFileInputChange}
+            />
+            <button
+              onClick={() => audioFileInputRef.current?.click()}
+              className="flex items-center gap-1 text-[11px] px-2 py-1 shrink-0 bg-blue-50 dark:bg-blue-950/50 hover:bg-blue-100 dark:hover:bg-blue-900/50 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 rounded-lg transition font-semibold"
+              title="音声ファイルだけを読み込んで差し替えます（文字起こしは実行しません）"
+            >
+              <FileAudio className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">音声を差し替え</span>
+            </button>
           </div>
 
           {/* Main playback buttons */}
