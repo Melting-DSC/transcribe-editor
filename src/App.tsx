@@ -39,9 +39,15 @@ import {
 import { SAMPLE_TRANSCRIPT_1, generateTestAudioBlob } from './utils/sampleData';
 
 const STORAGE_KEY_SEGMENTS = 'transcription_editor_segments';
-const STORAGE_KEY_AUDIO_NAME = 'transcription_editor_audio_name';
 const STORAGE_KEY_IMPORTED_AUDIO_FILE = 'transcription_editor_imported_audio_file';
 const STORAGE_KEY_LAST_SAVED = 'transcription_editor_last_saved';
+
+// Maximum number of undo steps kept in memory
+const HISTORY_LIMIT = 200;
+
+// Re-indexes IDs to be strictly sequential integers starting from 1
+const normalizeSegments = (list: TranscriptSegment[]): TranscriptSegment[] =>
+  list.map((s, idx) => ({ ...s, id: idx + 1 }));
 
 export default function App() {
   // Main transcript state initialized from localStorage if available
@@ -60,24 +66,47 @@ export default function App() {
     return SAMPLE_TRANSCRIPT_1;
   });
 
-  // Undo / Redo history
-  const [history, setHistory] = useState<TranscriptSegment[][]>(() => [segments]);
-  const [historyIndex, setHistoryIndex] = useState(0);
+  // Always-current mirror of `segments` for history snapshots and debounced saves
+  const segmentsRef = useRef<TranscriptSegment[]>(segments);
+  useEffect(() => {
+    segmentsRef.current = segments;
+  }, [segments]);
+
+  // Undo / Redo history. Kept in a ref so that reads and writes stay synchronous
+  // (avoids stale-closure bugs); a small piece of state mirrors it for rendering.
+  const historyRef = useRef<{ entries: TranscriptSegment[][]; index: number }>({
+    entries: [segments],
+    index: 0,
+  });
+  const [canUndo, setCanUndo] = useState(false);
+  const [canRedo, setCanRedo] = useState(false);
+
+  // Debounce timer for coalescing a burst of text edits into one undo step
+  const textHistoryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingTextEditRef = useRef(false);
+  useEffect(() => () => {
+    if (textHistoryTimerRef.current) clearTimeout(textHistoryTimerRef.current);
+  }, []);
 
   // Audio player state
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
-  const [audioName, setAudioName] = useState<string>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY_AUDIO_NAME);
-      if (saved) return saved;
-    } catch (e) {}
-    return 'デモ音声 (佐藤・高橋の会話)';
-  });
+  // NOTE: an audio file cannot be persisted in localStorage, so we never restore a
+  // previous file's label as if it were still loaded. This always reflects the audio
+  // currently in memory (the demo tone until the user re-attaches a file).
+  const [audioName, setAudioName] = useState<string>('デモ音声 (佐藤・高橋の会話)');
   const [importedAudioFileName, setImportedAudioFileName] = useState<string | null>(() => {
     try {
       return localStorage.getItem(STORAGE_KEY_IMPORTED_AUDIO_FILE);
     } catch (e) {
       return null;
+    }
+  });
+  // Shown on load when a previously imported audio file is no longer attached
+  const [isAudioRelinkNoticeVisible, setIsAudioRelinkNoticeVisible] = useState<boolean>(() => {
+    try {
+      return !!localStorage.getItem(STORAGE_KEY_IMPORTED_AUDIO_FILE);
+    } catch (e) {
+      return false;
     }
   });
   const [lastSavedTime, setLastSavedTime] = useState<string | null>(() => {
@@ -140,7 +169,7 @@ export default function App() {
     }
   }, [segments]);
 
-  // Persist importedAudioFileName and audioName
+  // Persist importedAudioFileName (used for the CSV export filename default)
   useEffect(() => {
     try {
       if (importedAudioFileName) {
@@ -151,16 +180,6 @@ export default function App() {
     } catch (e) {}
   }, [importedAudioFileName]);
 
-  useEffect(() => {
-    try {
-      if (audioName) {
-        localStorage.setItem(STORAGE_KEY_AUDIO_NAME, audioName);
-      } else {
-        localStorage.removeItem(STORAGE_KEY_AUDIO_NAME);
-      }
-    } catch (e) {}
-  }, [audioName]);
-
   // Synchronous auto-save on beforeunload to prevent any data loss on window close / refresh
   useEffect(() => {
     const handleBeforeUnload = () => {
@@ -169,9 +188,6 @@ export default function App() {
         if (importedAudioFileName) {
           localStorage.setItem(STORAGE_KEY_IMPORTED_AUDIO_FILE, importedAudioFileName);
         }
-        if (audioName) {
-          localStorage.setItem(STORAGE_KEY_AUDIO_NAME, audioName);
-        }
       } catch (e) {}
     };
 
@@ -179,7 +195,7 @@ export default function App() {
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
     };
-  }, [segments, importedAudioFileName, audioName]);
+  }, [segments, importedAudioFileName]);
 
   // On initial mount, prepare initial synthetic audio for sample demo if no audio attached
   useEffect(() => {
@@ -233,45 +249,99 @@ export default function App() {
     return Array.from(speakers);
   }, [segments]);
 
-  // Helper to commit state change with undo history
-  const commitSegmentsChange = useCallback((newSegments: TranscriptSegment[]) => {
-    // Re-index strictly sequential IDs
-    const normalized = newSegments.map((s, idx) => ({
-      ...s,
-      id: idx + 1,
-    }));
+  // Mirror the history ref into state so the toolbar buttons re-render
+  const syncHistoryFlags = useCallback(() => {
+    const h = historyRef.current;
+    setCanUndo(h.index > 0);
+    setCanRedo(h.index < h.entries.length - 1);
+  }, []);
 
+  // Appends a snapshot to the undo stack, truncating any redo branch and
+  // capping the stack at HISTORY_LIMIT entries.
+  const pushHistory = useCallback((snapshot: TranscriptSegment[]) => {
+    const h = historyRef.current;
+    const entries = h.entries.slice(0, h.index + 1);
+    entries.push(snapshot);
+    let index = entries.length - 1;
+    if (entries.length > HISTORY_LIMIT) {
+      const overflow = entries.length - HISTORY_LIMIT;
+      entries.splice(0, overflow);
+      index -= overflow;
+    }
+    historyRef.current = { entries, index };
+    syncHistoryFlags();
+  }, [syncHistoryFlags]);
+
+  // Commits any pending (debounced) text edit as a single undo step
+  const flushPendingHistory = useCallback(() => {
+    if (textHistoryTimerRef.current) {
+      clearTimeout(textHistoryTimerRef.current);
+      textHistoryTimerRef.current = null;
+    }
+    if (pendingTextEditRef.current) {
+      pendingTextEditRef.current = false;
+      pushHistory(segmentsRef.current);
+    }
+  }, [pushHistory]);
+
+  // Coalesces a burst of keystrokes into one undo step
+  const scheduleTextHistory = useCallback(() => {
+    pendingTextEditRef.current = true;
+    if (textHistoryTimerRef.current) {
+      clearTimeout(textHistoryTimerRef.current);
+    }
+    textHistoryTimerRef.current = setTimeout(() => {
+      textHistoryTimerRef.current = null;
+      if (pendingTextEditRef.current) {
+        pendingTextEditRef.current = false;
+        pushHistory(segmentsRef.current);
+      }
+    }, 600);
+  }, [pushHistory]);
+
+  // Helper to commit a structural state change with undo history
+  const commitSegmentsChange = useCallback((newSegments: TranscriptSegment[]) => {
+    // Flush a pending text edit first so it becomes its own undo step
+    flushPendingHistory();
+
+    const normalized = normalizeSegments(newSegments);
+    segmentsRef.current = normalized;
     setSegments(normalized);
-    setHistory((prev) => {
-      const trimmed = prev.slice(0, historyIndex + 1);
-      return [...trimmed, normalized];
-    });
-    setHistoryIndex((prev) => prev + 1);
-  }, [historyIndex]);
+    pushHistory(normalized);
+  }, [flushPendingHistory, pushHistory]);
 
   // Undo / Redo
   const handleUndo = useCallback(() => {
-    if (historyIndex > 0) {
-      const nextIndex = historyIndex - 1;
-      setHistoryIndex(nextIndex);
-      setSegments(history[nextIndex]);
-    }
-  }, [historyIndex, history]);
+    flushPendingHistory();
+    const h = historyRef.current;
+    if (h.index <= 0) return;
+    const index = h.index - 1;
+    const target = h.entries[index];
+    historyRef.current = { ...h, index };
+    segmentsRef.current = target;
+    setSegments(target);
+    syncHistoryFlags();
+  }, [flushPendingHistory, syncHistoryFlags]);
 
   const handleRedo = useCallback(() => {
-    if (historyIndex < history.length - 1) {
-      const nextIndex = historyIndex + 1;
-      setHistoryIndex(nextIndex);
-      setSegments(history[nextIndex]);
-    }
-  }, [historyIndex, history]);
+    flushPendingHistory();
+    const h = historyRef.current;
+    if (h.index >= h.entries.length - 1) return;
+    const index = h.index + 1;
+    const target = h.entries[index];
+    historyRef.current = { ...h, index };
+    segmentsRef.current = target;
+    setSegments(target);
+    syncHistoryFlags();
+  }, [flushPendingHistory, syncHistoryFlags]);
 
   // Segment operations
   const handleUpdateText = useCallback((id: number, text: string) => {
-    setSegments((prev) =>
-      prev.map((s) => (s.id === id ? { ...s, text } : s))
-    );
-  }, []);
+    const next = segmentsRef.current.map((s) => (s.id === id ? { ...s, text } : s));
+    segmentsRef.current = next;
+    setSegments(next);
+    scheduleTextHistory();
+  }, [scheduleTextHistory]);
 
   const handleUpdateSpeaker = useCallback((id: number, speaker: string) => {
     commitSegmentsChange(
@@ -570,6 +640,7 @@ export default function App() {
     setAudioUrl(url);
     setAudioName(file.name);
     setImportedAudioFileName(file.name);
+    setIsAudioRelinkNoticeVisible(false);
   }, []);
 
   // Transcribe API Call
@@ -647,9 +718,9 @@ export default function App() {
       commitSegmentsChange(SAMPLE_TRANSCRIPT_1);
       setAudioName('デモ音声 (佐藤・高橋の会話)');
       setImportedAudioFileName(null);
+      setIsAudioRelinkNoticeVisible(false);
       try {
         localStorage.removeItem(STORAGE_KEY_SEGMENTS);
-        localStorage.removeItem(STORAGE_KEY_AUDIO_NAME);
         localStorage.removeItem(STORAGE_KEY_IMPORTED_AUDIO_FILE);
         localStorage.removeItem(STORAGE_KEY_LAST_SAVED);
       } catch (e) {}
@@ -684,6 +755,7 @@ export default function App() {
         setAudioUrl(url);
         setAudioName(audioFile.name);
         setImportedAudioFileName(audioFile.name);
+        setIsAudioRelinkNoticeVisible(false);
       } else if (mode === 'replace') {
         setAudioUrl(null);
         setAudioName('');
@@ -787,6 +859,23 @@ export default function App() {
           </div>
         )}
 
+        {isAudioRelinkNoticeVisible && importedAudioFileName && (
+          <div className="mb-4 p-3 rounded-xl border border-amber-300 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-200 text-xs flex items-center justify-between gap-2 animate-in fade-in">
+            <div className="flex items-center gap-2">
+              <Info className="w-4 h-4 shrink-0 text-amber-600" />
+              <span>
+                前回使用した音声「{importedAudioFileName}」はブラウザの制約により再読み込みされていません（CSVのファイル名には引き続き使用されます）。再生するには音声ファイルを選択し直してください。
+              </span>
+            </div>
+            <button
+              onClick={() => setIsAudioRelinkNoticeVisible(false)}
+              className="font-bold underline ml-2 shrink-0"
+            >
+              閉じる
+            </button>
+          </div>
+        )}
+
         {/* Audio Input Section */}
         <AudioInputSection
           onTranscribe={handleTranscribe}
@@ -803,8 +892,8 @@ export default function App() {
           speakerList={speakerList}
           searchQuery={searchQuery}
           selectedSpeakerFilter={selectedSpeakerFilter}
-          canUndo={historyIndex > 0}
-          canRedo={historyIndex < history.length - 1}
+          canUndo={canUndo}
+          canRedo={canRedo}
           audioFileName={importedAudioFileName}
           lastSavedTime={lastSavedTime}
           onSearchChange={setSearchQuery}

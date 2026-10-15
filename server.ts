@@ -53,6 +53,17 @@ function defaultSpeakerLetter(label: string, index: number): string {
 // Prohibited generic role keywords that should never be used as speaker names
 const ROLE_KEYWORDS = ['面接官', '応募者', '司会', '司会者', '進行', '進行役', '医師', '患者', '部長', '課長', '先生', '質問者', '回答者', '参加者'];
 
+// Human-readable labels for the models reported back to the client
+const MODEL_DISPLAY_NAMES: Record<string, string> = {
+  'gemini-3.5-transcribe': 'Gemini 3.5 Transcribe',
+  'gemini-3.1-flash-lite': 'Gemini 3.1 Flash-Lite',
+  'gemini-3.8-flash': 'Gemini 3.8 Flash',
+};
+
+function modelDisplayName(model: string): string {
+  return MODEL_DISPLAY_NAMES[model] || model;
+}
+
 function sanitizeSpeakerName(name: string, fallback: string): string {
   const trimmed = (name || '').trim();
   if (!trimmed) return fallback;
@@ -120,7 +131,10 @@ app.post('/api/transcribe', async (req, res) => {
 
     // Step 1: Call Gemini 3.5 Transcribe with native speaker diarization and word timestamps enabled
     let transcribeResponse: any = null;
-    let isQuotaFallback = false;
+    // True when step 1 failed and we fell back to another model
+    let usedFallback = false;
+    // True only when the step-1 failure was a genuine quota / rate-limit error
+    let isQuotaError = false;
 
     try {
       transcribeResponse = await ai.models.generateContent({
@@ -140,24 +154,29 @@ app.post('/api/transcribe', async (req, res) => {
       });
     } catch (transcribeErr: any) {
       const errStr = JSON.stringify(transcribeErr?.message || transcribeErr || '');
-      const isQuota = transcribeErr?.status === 429 || errStr.includes('429') || errStr.includes('RESOURCE_EXHAUSTED') || errStr.includes('quota');
+      isQuotaError =
+        transcribeErr?.status === 429 ||
+        errStr.includes('429') ||
+        errStr.includes('RESOURCE_EXHAUSTED') ||
+        errStr.includes('quota');
+      usedFallback = true;
 
-      if (isQuota) {
+      if (isQuotaError) {
         console.warn('Gemini 3.5 Transcribe hit quota 429 limit, switching to multimodal fallback (gemini-3.1-flash-lite):', transcribeErr?.message);
-        isQuotaFallback = true;
       } else {
-        // If other error, also attempt fallback
+        // Non-quota failure (invalid model, network, etc.) — still attempt the fallback
         console.warn('Gemini 3.5 Transcribe failed with error, attempting fallback:', transcribeErr);
-        isQuotaFallback = true;
       }
     }
 
     let segments: TranscriptSegment[] = [];
     let usedNativeDiarization = false;
     let transcribedRawText = '';
+    // The model that actually produced the returned segments
+    let modelUsed = '';
 
     // If Gemini 3.5 Transcribe succeeded, process its response
-    if (transcribeResponse && !isQuotaFallback) {
+    if (transcribeResponse) {
       const parts = transcribeResponse.candidates?.[0]?.content?.parts || [];
       transcribedRawText = extractTranscriptionText(transcribeResponse);
 
@@ -276,8 +295,13 @@ ${contextHint ? `\n【補足コンテキスト/前提情報】:\n${contextHint}\
       }
     }
 
-    // Step 2 Fallback: If quota was exceeded or native diarization didn't produce segments,
-    // use direct multimodal transcription with gemini-3.1-flash-lite
+    // The native 3.5 Transcribe path produced segments
+    if (segments.length > 0) {
+      modelUsed = 'gemini-3.5-transcribe';
+    }
+
+    // Step 2 Fallback: If native diarization didn't produce segments, use direct
+    // multimodal transcription with gemini-3.1-flash-lite (then gemini-3.8-flash)
     if (segments.length === 0) {
       const directMultimodalPrompt = `
 あなたは高精度な音声文字起こしおよび話者特定（ダイアライゼーション）の専門AIです。
@@ -334,6 +358,7 @@ JSON配列のみを出力してください:
               text: String(item.text || '').trim(),
             };
           });
+          modelUsed = 'gemini-3.1-flash-lite';
         }
       } catch (fallbackAudioErr: any) {
         console.warn('Direct multimodal fallback with gemini-3.1-flash-lite failed, attempting gemini-3.8-flash:', fallbackAudioErr);
@@ -363,6 +388,7 @@ JSON配列のみを出力してください:
                 text: String(item.text || '').trim(),
               };
             });
+            modelUsed = 'gemini-3.8-flash';
           }
         } catch (flashErr) {
           console.error('All model attempts failed:', flashErr);
@@ -370,7 +396,7 @@ JSON配列のみを出力してください:
       }
     }
 
-    // If we have text from earlier but no segments, split into sentences
+    // If we have text from the 3.5 Transcribe step but no segments, split into sentences
     if (segments.length === 0 && transcribedRawText) {
       const sentenceParts = transcribedRawText
         .split(/(?<=[。！？\n])/)
@@ -398,6 +424,7 @@ JSON配列のみを出力してください:
           text: sentence,
         };
       });
+      modelUsed = 'gemini-3.5-transcribe';
     }
 
     if (segments.length === 0) {
@@ -412,9 +439,13 @@ JSON配列のみを出力してください:
       id: idx + 1,
     }));
 
-    const finalModelUsed = isQuotaFallback ? 'gemini-3.1-flash-lite' : 'gemini-3.5-transcribe';
-    const fallbackNotice = isQuotaFallback
-      ? '※ Gemini 3.5 Transcribe の無料利用枠クォータ（1日25回上限）に達したため、Gemini 3.1 Flash-Lite の高精度マルチモーダル機能で自動継続して文字起こしと話者分析を行いました。'
+    // Report the model that actually produced the segments (fall back to the
+    // primary model name only if somehow unset).
+    const finalModelUsed = modelUsed || 'gemini-3.5-transcribe';
+    const fallbackNotice = usedFallback
+      ? isQuotaError
+        ? `※ Gemini 3.5 Transcribe の無料利用枠クォータ（1日25回上限）に達したため、${modelDisplayName(finalModelUsed)} の高精度マルチモーダル機能で自動継続して文字起こしと話者分析を行いました。`
+        : `※ Gemini 3.5 Transcribe での処理に失敗したため、代替モデル（${modelDisplayName(finalModelUsed)}）で自動継続して文字起こしと話者分析を行いました。`
       : undefined;
 
     return res.json({
@@ -423,7 +454,7 @@ JSON配列のみを出力してください:
       rawText: transcribedRawText || segments.map((s) => s.text).join(' '),
       modelUsed: finalModelUsed,
       usedNativeDiarization,
-      isQuotaFallback,
+      isQuotaFallback: usedFallback && isQuotaError,
       fallbackNotice,
     });
   } catch (error: any) {
