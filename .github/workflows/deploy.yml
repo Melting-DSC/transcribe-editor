@@ -4,7 +4,7 @@ name: Deploy to GitHub Pages
 # リポジトリの Settings > Pages > Source を "GitHub Actions" にしておくこと。
 on:
   push:
-    branches: [feat/offline]
+    branches: [main]
   workflow_dispatch:
 
 permissions:

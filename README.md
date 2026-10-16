@@ -60,7 +60,7 @@ npm run preview   # ビルド済み dist/ をローカルでプレビュー
 
 **https://melting-dsc.github.io/transcribe-editor/**
 
-`feat/offline` ブランチに push すると GitHub Actions が自動でビルド・公開します
+`main` ブランチに push すると GitHub Actions が自動でビルド・公開します
 （`.github/workflows/deploy.yml`）。公開ページ用のビルドは base パスを付けるため
 `npm run build:pages` を使います（ローカルの `npm run build` は `/` のままです）。
 
