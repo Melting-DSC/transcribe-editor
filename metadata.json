@@ -1,6 +1,5 @@
 {
-  "name": "Gemini Transcribe - 話者分析文字起こしエディタ",
-  "description": "Gemini 3.5 Transcribeを活用した話者分離・分析付き音声文字起こし＆CSV出力アプリ。GUI上で発言や話者名の一括編集・変更、CSVダウンロードが可能。",
-  "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "name": "文字起こしエディタ",
+  "description": "ローカルの音声に同期しながら文字起こしを編集し、CSV/JSON/テキストで入出力できるブラウザ完結の文字起こしエディタ。",
+  "requestFramePermissions": []
 }

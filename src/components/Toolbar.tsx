@@ -17,9 +17,11 @@ import {
   CheckCircle2,
   RotateCcw,
   FileAudio,
+  PlayCircle,
 } from 'lucide-react';
 import { TranscriptSegment } from '../types';
-import { downloadCsv, downloadJson, downloadTxt, generateCsvString, parseCsv, getCsvFileName } from '../utils/csv';
+import { downloadCsv, downloadJson, downloadTxt, generateCsvString, getCsvFileName } from '../utils/csv';
+import { SAMPLE_TRANSCRIPT_1, SAMPLE_TRANSCRIPT_2, generateTestAudioBlob } from '../utils/sampleData';
 
 interface ToolbarProps {
   segments: TranscriptSegment[];
@@ -40,6 +42,7 @@ interface ToolbarProps {
   onUndo: () => void;
   onRedo: () => void;
   onResetToSample?: () => void;
+  onLoadSample?: (segments: TranscriptSegment[], name: string, audioBlob?: Blob) => void;
 }
 
 export const Toolbar: React.FC<ToolbarProps> = ({
@@ -61,12 +64,34 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   onUndo,
   onRedo,
   onResetToSample,
+  onLoadSample,
 }) => {
   const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
+  const [isSampleMenuOpen, setIsSampleMenuOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const audioFileInputRef = useRef<HTMLInputElement>(null);
 
   const csvFileName = getCsvFileName(audioFileName);
+
+  const handleLoadSample1 = () => {
+    if (!onLoadSample) return;
+    onLoadSample(
+      SAMPLE_TRANSCRIPT_1,
+      'サンプル対話 (佐藤・高橋)',
+      generateTestAudioBlob(65)
+    );
+    setIsSampleMenuOpen(false);
+  };
+
+  const handleLoadSample2 = () => {
+    if (!onLoadSample) return;
+    onLoadSample(
+      SAMPLE_TRANSCRIPT_2,
+      'サンプル会議 (田中・鈴木・山田)',
+      generateTestAudioBlob(35)
+    );
+    setIsSampleMenuOpen(false);
+  };
 
   const handleAudioFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files && e.target.files[0];
@@ -142,6 +167,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             <button
               onClick={onUndo}
               disabled={!canUndo}
+              aria-label="元に戻す"
               className="p-1.5 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-30 disabled:cursor-not-allowed rounded-lg transition"
               title="元に戻す (Ctrl+Z)"
             >
@@ -150,6 +176,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             <button
               onClick={onRedo}
               disabled={!canRedo}
+              aria-label="やり直し"
               className="p-1.5 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-30 disabled:cursor-not-allowed rounded-lg transition"
               title="やり直し (Ctrl+Y)"
             >
@@ -182,6 +209,40 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             <Plus className="w-4 h-4" />
             <span>発言追加</span>
           </button>
+
+          {/* Demo sample loader */}
+          {onLoadSample && (
+            <div className="relative">
+              <button
+                onClick={() => setIsSampleMenuOpen(!isSampleMenuOpen)}
+                className="flex items-center gap-1 text-xs px-3 py-1.5 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-xl transition font-medium"
+                title="デモ用のサンプル文字起こしデータを読み込みます"
+              >
+                <PlayCircle className="w-4 h-4" />
+                <span>デモ読み込み</span>
+                <ChevronDown className="w-3 h-3 opacity-70" />
+              </button>
+
+              {isSampleMenuOpen && (
+                <div className="absolute right-0 top-full mt-1.5 w-56 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl z-40 p-1.5 space-y-0.5 animate-in fade-in zoom-in-95 duration-100 text-xs">
+                  <button
+                    onClick={handleLoadSample1}
+                    className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 font-medium"
+                  >
+                    <PlayCircle className="w-4 h-4 text-blue-500" />
+                    <span>対話サンプル (佐藤・高橋)</span>
+                  </button>
+                  <button
+                    onClick={handleLoadSample2}
+                    className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 font-medium"
+                  >
+                    <PlayCircle className="w-4 h-4 text-emerald-500" />
+                    <span>会議サンプル (田中・鈴木・山田)</span>
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* CSV Preview */}
           <button

@@ -5,15 +5,12 @@ import {
   FileSpreadsheet,
   CheckCircle2,
   AlertCircle,
-  FileText,
   Clipboard,
-  Layers,
-  ArrowRight,
   Music,
-  FileAudio,
 } from 'lucide-react';
 import { TranscriptSegment } from '../types';
 import { parseCsv, readCsvFileWithEncoding } from '../utils/csv';
+import { ModalShell } from './ModalShell';
 
 interface CsvImportModalProps {
   isOpen: boolean;
@@ -162,8 +159,7 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({
   const detectedSpeakers = Array.from(new Set(parsedSegments.map((s) => s.speaker)));
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-150">
-      <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl max-w-3xl w-full shadow-2xl flex flex-col max-h-[90vh] overflow-hidden">
+    <ModalShell isOpen={isOpen} onClose={onClose} panelClassName="max-w-3xl">
         {/* Header */}
         <div className="px-6 py-4 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
@@ -179,6 +175,7 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({
           </div>
           <button
             onClick={onClose}
+            aria-label="閉じる"
             className="p-1.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition"
           >
             <X className="w-5 h-5" />
@@ -474,7 +471,6 @@ export const CsvImportModal: React.FC<CsvImportModalProps> = ({
             <span>{parsedSegments.length} 件の発言をインポートして編集</span>
           </button>
         </div>
-      </div>
-    </div>
+    </ModalShell>
   );
 };

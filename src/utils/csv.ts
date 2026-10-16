@@ -48,18 +48,16 @@ export function getCsvFileName(audioFileName?: string | null): string {
 }
 
 /**
- * Triggers browser download of the CSV file.
- * Adds UTF-8 BOM (\uFEFF) to guarantee correct character encoding in Excel.
+ * Triggers a browser download for the given content.
+ * Shared by the CSV / JSON / TXT exporters.
  */
-export function downloadCsv(segments: TranscriptSegment[], filename = 'transcription.csv'): void {
-  const csvContent = generateCsvString(segments);
-  // \uFEFF is UTF-8 Byte Order Mark (BOM)
-  const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+function downloadBlob(content: string | Blob, filename: string, mimeType: string): void {
+  const blob = content instanceof Blob ? content : new Blob([content], { type: mimeType });
   const url = URL.createObjectURL(blob);
-  
+
   const link = document.createElement('a');
   link.setAttribute('href', url);
-  link.setAttribute('download', filename.endsWith('.csv') ? filename : `${filename}.csv`);
+  link.setAttribute('download', filename);
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
@@ -67,20 +65,32 @@ export function downloadCsv(segments: TranscriptSegment[], filename = 'transcrip
 }
 
 /**
+ * Ensures the filename carries the expected extension.
+ */
+function withExtension(filename: string, ext: string): string {
+  return filename.toLowerCase().endsWith(ext) ? filename : `${filename}${ext}`;
+}
+
+/**
+ * Triggers browser download of the CSV file.
+ * Adds UTF-8 BOM (\uFEFF) to guarantee correct character encoding in Excel.
+ */
+export function downloadCsv(segments: TranscriptSegment[], filename = 'transcription.csv'): void {
+  const csvContent = generateCsvString(segments);
+  // \uFEFF is UTF-8 Byte Order Mark (BOM)
+  downloadBlob(
+    '\uFEFF' + csvContent,
+    withExtension(filename, '.csv'),
+    'text/csv;charset=utf-8;'
+  );
+}
+
+/**
  * Downloads as JSON
  */
 export function downloadJson(segments: TranscriptSegment[], filename = 'transcription.json'): void {
   const jsonContent = JSON.stringify(segments, null, 2);
-  const blob = new Blob([jsonContent], { type: 'application/json;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  
-  const link = document.createElement('a');
-  link.setAttribute('href', url);
-  link.setAttribute('download', filename.endsWith('.json') ? filename : `${filename}.json`);
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
+  downloadBlob(jsonContent, withExtension(filename, '.json'), 'application/json;charset=utf-8;');
 }
 
 /**
@@ -90,16 +100,7 @@ export function downloadTxt(segments: TranscriptSegment[], filename = 'transcrip
   const txtContent = segments
     .map((s) => `[${s.timestamp}] ${s.speaker}:\n${s.text}\n`)
     .join('\n');
-  const blob = new Blob([txtContent], { type: 'text/plain;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  
-  const link = document.createElement('a');
-  link.setAttribute('href', url);
-  link.setAttribute('download', filename.endsWith('.txt') ? filename : `${filename}.txt`);
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
+  downloadBlob(txtContent, withExtension(filename, '.txt'), 'text/plain;charset=utf-8;');
 }
 
 /**
@@ -147,9 +148,23 @@ export function parseCsv(csvText: string): TranscriptSegment[] {
   // Strip BOM if present
   let cleanText = csvText.replace(/^\uFEFF/, '').trim();
 
-  // Detect delimiter: check first line for tabs vs commas
+  // Detect delimiter: compare comma vs tab counts on the first line, ignoring
+  // anything inside quotes so that a TSV with commas in the text isn't mistaken
+  // for a comma-separated file.
   const firstLine = cleanText.split(/[\r\n]+/)[0] || '';
-  const delimiter = firstLine.includes('\t') && !firstLine.includes(',') ? '\t' : ',';
+  let commaCount = 0;
+  let tabCount = 0;
+  let insideQuotes = false;
+  for (const char of firstLine) {
+    if (char === '"') {
+      insideQuotes = !insideQuotes;
+      continue;
+    }
+    if (insideQuotes) continue;
+    if (char === ',') commaCount++;
+    else if (char === '\t') tabCount++;
+  }
+  const delimiter = tabCount > commaCount ? '\t' : ',';
 
   // RFC 4180 multi-line quoted CSV parser
   const rows: string[][] = [];

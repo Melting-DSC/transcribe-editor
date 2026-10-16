@@ -7,8 +7,6 @@ import {
   Scissors,
   Check,
   ChevronDown,
-  User,
-  Clock,
   Edit2,
 } from 'lucide-react';
 import { TranscriptSegment } from '../types';
@@ -19,7 +17,6 @@ interface UtteranceCardProps {
   index: number;
   isActive: boolean;
   speakerList: string[];
-  searchQuery: string;
   onUpdateText: (id: number, text: string) => void;
   onUpdateSpeaker: (id: number, speaker: string) => void;
   onUpdateTimestamp: (id: number, timestamp: string) => void;
@@ -35,7 +32,6 @@ export const UtteranceCard: React.FC<UtteranceCardProps> = ({
   index,
   isActive,
   speakerList,
-  searchQuery,
   onUpdateText,
   onUpdateSpeaker,
   onUpdateTimestamp,
@@ -106,25 +102,6 @@ export const UtteranceCard: React.FC<UtteranceCardProps> = ({
     if (!textareaRef.current) return;
     const cursor = textareaRef.current.selectionStart || Math.floor(segment.text.length / 2);
     onSplitSegment(segment.id, cursor);
-  };
-
-  // Highlight search matches
-  const renderHighlightedText = (text: string, query: string) => {
-    if (!query.trim()) return null;
-    const parts = text.split(new RegExp(`(${query})`, 'gi'));
-    return (
-      <span className="hidden">
-        {parts.map((part, i) =>
-          part.toLowerCase() === query.toLowerCase() ? (
-            <mark key={i} className="bg-yellow-200 dark:bg-yellow-900/60 text-yellow-900 dark:text-yellow-100">
-              {part}
-            </mark>
-          ) : (
-            part
-          )
-        )}
-      </span>
-    );
   };
 
   return (

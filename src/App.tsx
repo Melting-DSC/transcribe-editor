@@ -5,13 +5,9 @@
 
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import {
-  Mic,
+  FileAudio,
   FileSpreadsheet,
   Users,
-  Sparkles,
-  Download,
-  AlertCircle,
-  Volume2,
   CheckCircle2,
   Info,
   Upload,
@@ -23,7 +19,6 @@ import {
 } from 'lucide-react';
 import { TranscriptSegment } from './types';
 import { AudioPlayerBar } from './components/AudioPlayerBar';
-import { AudioInputSection } from './components/AudioInputSection';
 import { UtteranceCard } from './components/UtteranceCard';
 import { Toolbar } from './components/Toolbar';
 import { SpeakerManagerModal } from './components/SpeakerManagerModal';
@@ -32,7 +27,7 @@ import { CsvImportModal } from './components/CsvImportModal';
 import {
   parseTimestampToSeconds,
   parseRangeToSeconds,
-  PLAYBACK_RATES,
+  formatSecondsToTimestamp,
   getNextSlowerRate,
   getNextFasterRate,
 } from './utils/time';
@@ -132,9 +127,7 @@ export default function App() {
   const [isCsvModalOpen, setIsCsvModalOpen] = useState(false);
   const [isCsvImportModalOpen, setIsCsvImportModalOpen] = useState(false);
 
-  // Processing & Error states
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  // Success / notification banner
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   // Shortcut HUD Toast
@@ -418,11 +411,9 @@ export default function App() {
 
     const currentRange = parseRangeToSeconds(current.timestamp);
     const nextRange = parseRangeToSeconds(next.timestamp);
-    const mergedTs = `${current.timestamp.split('-')[0].trim()} - ${
-      next.timestamp.includes('-')
-        ? next.timestamp.split('-')[1].trim()
-        : next.timestamp
-    }`;
+    const mergedStart = currentRange.start;
+    const mergedEnd = nextRange.end !== null ? nextRange.end : nextRange.start;
+    const mergedTs = `${formatSecondsToTimestamp(mergedStart)} - ${formatSecondsToTimestamp(mergedEnd)}`;
 
     const mergedSegment: TranscriptSegment = {
       ...current,
@@ -461,7 +452,7 @@ export default function App() {
     const newSegment: TranscriptSegment = {
       id: segments.length + 1,
       timestamp: last ? last.timestamp : '00:00',
-      speaker: last ? last.speaker : '話者1',
+      speaker: last ? last.speaker : '話者A',
       text: '',
     };
     commitSegmentsChange([...segments, newSegment]);
@@ -680,7 +671,7 @@ export default function App() {
   }, []);
 
   // Standalone audio import: attach or replace the player's audio file on its own,
-  // without touching the transcript and without starting a transcription.
+  // without touching the transcript.
   const handleImportAudioOnly = useCallback(
     (file: File) => {
       handleAudioFileSelected(file);
@@ -689,62 +680,6 @@ export default function App() {
     },
     [handleAudioFileSelected]
   );
-
-  // Transcribe API Call
-  const handleTranscribe = async (
-    audioBase64: string,
-    mimeType: string,
-    contextHint: string,
-    fileName: string,
-    audioFileUrl?: string
-  ) => {
-    setIsProcessing(true);
-    setErrorMessage(null);
-
-    try {
-      const res = await fetch('/api/transcribe', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          audioBase64,
-          mimeType,
-          contextHint,
-        }),
-      });
-
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || '文字起こしに失敗しました。');
-      }
-
-      if (data.segments && Array.isArray(data.segments) && data.segments.length > 0) {
-        commitSegmentsChange(data.segments);
-        setAudioName(fileName);
-        setImportedAudioFileName(fileName);
-        if (audioFileUrl) {
-          setAudioUrl(audioFileUrl);
-        }
-        if (data.fallbackNotice) {
-          setSuccessMessage(data.fallbackNotice);
-          setTimeout(() => setSuccessMessage(null), 7000);
-        } else {
-          setSuccessMessage(
-            data.usedNativeDiarization
-              ? 'Gemini 3.5 Transcribe 標準音響話者分析（Diarization）により文字起こしと話者分離が完了しました！'
-              : 'Gemini 3.5 Transcribe による文字起こしと話者分析が完了しました！'
-          );
-          setTimeout(() => setSuccessMessage(null), 4000);
-        }
-      } else {
-        throw new Error('文字起こし結果が取得できませんでした。');
-      }
-    } catch (err: any) {
-      console.error('Transcribe error:', err);
-      setErrorMessage(err.message || 'エラーが発生しました。');
-    } finally {
-      setIsProcessing(false);
-    }
-  };
 
   // Sample load handler
   const handleLoadSample = (sampleSegments: TranscriptSegment[], name: string, audioBlob?: Blob) => {
@@ -837,19 +772,14 @@ export default function App() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3.5 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="p-2 bg-gradient-to-tr from-blue-600 to-indigo-600 text-white rounded-xl shadow-md">
-              <Mic className="w-5 h-5" />
+              <FileAudio className="w-5 h-5" />
             </div>
             <div>
-              <div className="flex items-center gap-2">
-                <h1 className="font-extrabold text-base sm:text-lg tracking-tight bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 bg-clip-text text-transparent">
-                  Gemini Transcribe
-                </h1>
-                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-950/80 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 font-bold">
-                  3.5 Transcribe
-                </span>
-              </div>
+              <h1 className="font-extrabold text-base sm:text-lg tracking-tight bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 bg-clip-text text-transparent">
+                文字起こしエディタ
+              </h1>
               <p className="text-xs text-gray-500 dark:text-gray-400">
-                話者分析・推測付き音声文字起こし & CSV出力エディタ
+                音声に同期して文字起こしを編集・CSV入出力できるローカルエディタ
               </p>
             </div>
           </div>
@@ -883,22 +813,7 @@ export default function App() {
 
       {/* Main Container */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 flex-1 w-full pb-28">
-        {/* Alerts */}
-        {errorMessage && (
-          <div className="mb-4 p-4 rounded-xl border border-rose-300 dark:border-rose-900 bg-rose-50 dark:bg-rose-950/50 text-rose-800 dark:text-rose-200 text-xs flex items-center justify-between animate-in fade-in">
-            <div className="flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
-              <span>{errorMessage}</span>
-            </div>
-            <button
-              onClick={() => setErrorMessage(null)}
-              className="font-bold underline ml-2"
-            >
-              閉じる
-            </button>
-          </div>
-        )}
-
+        {/* Notifications */}
         {successMessage && (
           <div className="mb-4 p-3 rounded-xl border border-emerald-300 dark:border-emerald-900 bg-emerald-50 dark:bg-emerald-950/50 text-emerald-800 dark:text-emerald-200 text-xs flex items-center gap-2 animate-in fade-in">
             <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
@@ -944,16 +859,6 @@ export default function App() {
           </div>
         )}
 
-        {/* Audio Input Section */}
-        <AudioInputSection
-          onTranscribe={handleTranscribe}
-          onLoadSample={handleLoadSample}
-          onOpenCsvImport={() => setIsCsvImportModalOpen(true)}
-          onAudioFileSelected={handleImportAudioOnly}
-          isProcessing={isProcessing}
-          apiKeyConfigured={true}
-        />
-
         {/* Toolbar */}
         <Toolbar
           segments={segments}
@@ -974,6 +879,7 @@ export default function App() {
           onUndo={handleUndo}
           onRedo={handleRedo}
           onResetToSample={handleResetToSample}
+          onLoadSample={handleLoadSample}
         />
 
         {/* Utterance List Editor */}
@@ -994,7 +900,6 @@ export default function App() {
                 index={index}
                 isActive={activeSegmentId === segment.id}
                 speakerList={speakerList}
-                searchQuery={searchQuery}
                 onUpdateText={handleUpdateText}
                 onUpdateSpeaker={handleUpdateSpeaker}
                 onUpdateTimestamp={handleUpdateTimestamp}

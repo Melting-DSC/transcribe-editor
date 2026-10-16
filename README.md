@@ -1,20 +1,49 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# 文字起こしエディタ
 
-# Run and deploy your AI Studio app
+ローカルの音声に同期しながら文字起こしデータを編集し、CSV / JSON / テキストで
+入出力できる、ブラウザ完結の文字起こしエディタです。
 
-This contains everything you need to run your app locally.
+文字起こし（音声→テキストの変換）は行いません。すでにある文字起こしデータを
+CSV などから読み込むか手入力し、音声を聴きながら整文・話者整理するための
+編集ツールです。サーバーや API キーは不要で、データが外部に送信されることは
+ありません。
 
-View your app in AI Studio: https://ai.studio/apps/6b356bd0-46bf-4535-8d92-c72564d1a13c
+## 主な機能
 
-## Run Locally
+- 発言ごとの編集（本文・タイムスタンプ・話者）
+- 音声ファイルをローカルで添付し、再生位置と発言を同期（自動追従・速度変更・±5秒移動）
+- CSV / TSV のインポート（UTF-8 / Shift-JIS 自動判定、日本語ヘッダー対応）
+- CSV / JSON / テキストのエクスポート（CSV は UTF-8 BOM 付きで Excel 文字化け防止）
+- 話者名の一括置換・統合（名寄せ）
+- 検索・話者による絞り込み、Undo / Redo
+- キーボードショートカット（Space: 再生/停止、←/→: ±5秒、`<`/`>`: 速度変更）
+- 編集内容は localStorage に自動保存
 
-**Prerequisites:**  Node.js
+## 使い方
 
+**必要なもの:** Node.js
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+1. 依存関係をインストール
+   ```sh
+   npm install
+   ```
+2. 開発サーバーを起動
+   ```sh
+   npm run dev
+   ```
+3. ブラウザで表示された URL を開く
+
+## コマンド
+
+| コマンド | 内容 |
+| --- | --- |
+| `npm run dev` | 開発サーバー（Vite）を起動 |
+| `npm run build` | `dist/` に本番ビルドを出力 |
+| `npm run preview` | ビルド済みの `dist/` をローカルでプレビュー |
+| `npm run lint` | 型チェック（`tsc --noEmit`） |
+| `npm run clean` | `dist/` を削除 |
+
+## データ形式
+
+CSV の列は `id,timestamp,speaker,text` に固定です。タイムスタンプは
+`MM:SS` または `MM:SS - MM:SS` のような自由な文字列を想定しています。
