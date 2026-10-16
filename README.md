@@ -54,6 +54,16 @@ npm run build     # dist/ に本番ビルドを出力
 npm run preview   # ビルド済み dist/ をローカルでプレビュー
 ```
 
+### 公開版（GitHub Pages）
+
+インストールせずにブラウザだけで試したい場合は、公開版を利用できます。
+
+**https://melting-dsc.github.io/transcribe-editor/**
+
+`feat/offline` ブランチに push すると GitHub Actions が自動でビルド・公開します
+（`.github/workflows/deploy.yml`）。公開ページ用のビルドは base パスを付けるため
+`npm run build:pages` を使います（ローカルの `npm run build` は `/` のままです）。
+
 ---
 
 ## 基本的な使い方
@@ -202,6 +212,7 @@ id,timestamp,speaker,text
 | --- | --- |
 | `npm run dev` | 開発サーバー（Vite）を起動 |
 | `npm run build` | `dist/` に本番ビルドを出力 |
+| `npm run build:pages` | GitHub Pages 用に `dist/` を出力（base に `/transcribe-editor/` を付与） |
 | `npm run preview` | ビルド済みの `dist/` をローカルでプレビュー |
 | `npm run lint` | 型チェック（`tsc --noEmit`） |
 | `npm run clean` | `dist/` を削除 |
